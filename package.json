@@ -1,0 +1,18 @@
+{
+  "name": "dsh-tab-indicator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "description": "Running/done count badge on the DSH browser tab",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zz0-0/dsh-tab-indicator.git"
+  },
+  "homepage": "https://github.com/zz0-0/dsh-tab-indicator#readme",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
