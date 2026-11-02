@@ -80,6 +80,9 @@ data: {"type":"state","running":1,"sessions":["…"],"at":…}
 - `ctx.agents.roots()` seeds the snapshot for agents that are already running
   when the plugin loads.
 - `agent/status` (`idle` / `running`) and `agent/disposed` keep it current.
+- A 2-second reconciliation against `ctx.agents.roots()` repairs a transition
+  missed across a plugin reload and removes a session whose agent is no longer
+  running.
 - `connection.requestRejection` guards the stream with the same browser cookie
   used by the rest of the Web API.
 - `ctx.webServer.tapIndex` inserts

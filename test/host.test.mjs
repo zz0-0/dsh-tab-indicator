@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import test from 'node:test'
+import test, { mock } from 'node:test'
 
 import { apply } from '../lib/index.js'
 
@@ -158,6 +158,24 @@ test('initial scan includes roots that are already running', () => {
   const [state] = stateFrames(response)
   assert.equal(state.running, 1)
   assert.deepEqual(state.sessions, ['warm-1'])
+})
+
+test('reconcile clears a session that missed its idle event', () => {
+  mock.timers.enable({ apis: ['setInterval'] })
+  try {
+    const agent = rootAgent('stale-1')
+    const { ctx, routes } = createContext({ roots: [agent] })
+    apply(ctx)
+
+    const response = openStream(routes)
+    assert.equal(stateFrames(response).at(-1).running, 1)
+
+    agent.status = 'idle'
+    mock.timers.tick(2_000)
+    assert.equal(stateFrames(response).at(-1).running, 0)
+  } finally {
+    mock.timers.reset()
+  }
 })
 
 test('disposal removes a running agent from the snapshot', () => {
