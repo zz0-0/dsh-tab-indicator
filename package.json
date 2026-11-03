@@ -5,6 +5,7 @@
   "type": "module",
   "main": "lib/index.js",
   "description": "Running/done count badge on the DSH browser tab",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/zz0-0/dsh-tab-indicator.git"
