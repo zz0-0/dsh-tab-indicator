@@ -30,7 +30,8 @@ see from any other tab whether work is still running.
 
 ## Requirements
 
-- **DSH 0.2.1.x** with the web profile. Tested with `0.2.1-rc.3`.
+- **DSH 0.2.x** (0.2.1 and 0.2.2 lines) with the web profile. Tested with
+  `0.2.2-rc.1`; `engines.dsh = ">=0.2.1-0 <0.3.0-0"`.
 - For development and tests, Node.js `^22.19.0 || >=24.0.0` (the DSH
   requirement).
 - No DeepSeek API key: the plugin never calls an external service.
