@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+git diff --check
+if ! command -v npm >/dev/null 2>&1; then
+  echo "FAIL pre-push: npm not in PATH" >&2
+  echo "  run: direnv exec . git push   (or nix develop)" >&2
+  exit 1
+fi
+npm test
