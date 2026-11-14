@@ -1,11 +1,12 @@
 # dsh-tab-indicator-plugin · 工作回路
 
-> 由 `setup` 生成；改这里就是改回路。开工先读本页，收尾跑 `closeout --repo .`。
+> 由 `setup` 生成；改这里就是改回路。开工 `/home/zz/Project/ai/conventions/checks/tools/start --repo . --task "<task>"`，收尾 `/home/zz/Project/ai/conventions/checks/tools/closeout --repo .`。
 
 ## 入口
 
 - 入口命令：`direnv exec . npm test`
-- 测试：`direnv exec . npm test`
+- 任务路由：`/home/zz/Project/ai/conventions/checks/tools/start --repo . --task "<task>"`
+- 收尾：`/home/zz/Project/ai/conventions/checks/tools/closeout --repo .`
 - 链：`/home/zz/Project/ai/chains/coding.md`
 - 技能包：`/home/zz/Project/ai/skills/packs/coding/INDEX.md`
 - 文档：`README.md`
@@ -18,4 +19,4 @@
 
 ## 不做
 
-- 状态不写链；状态在本页、`TRACE.md`、`status`。
+- 状态不写链；状态在本页、`TRACE.md`、`/home/zz/Project/ai/conventions/checks/tools/status`。
