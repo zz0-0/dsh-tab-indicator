@@ -237,3 +237,16 @@ test('dispose ends open streams and removes routes', () => {
   assert.equal(routes.has('/dsh-tab-indicator/events'), false)
   assert.equal(routes.has('/dsh-tab-indicator/client.js'), false)
 })
+
+test('counts a running root without a session header', () => {
+  const { ctx, routes, listeners } = createContext()
+  apply(ctx)
+  const response = openStream(routes)
+  const agent = { id: 'root-no-header', status: 'running', session: { id: 'root-no-header' } }
+
+  emit(listeners, 'agent/status', { agent, status: 'running' })
+
+  const state = stateFrames(response).at(-1)
+  assert.equal(state.running, 1)
+  assert.deepEqual(state.sessions, ['root-no-header'])
+})
