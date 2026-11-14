@@ -19,5 +19,35 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
-  }
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "node --test test/host.test.mjs"
+  },
+  "bugs": {
+    "url": "https://github.com/zz0-0/dsh-tab-indicator/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "tab",
+    "indicator",
+    "running",
+    "done",
+    "标签页",
+    "任务"
+  ],
+  "files": [
+    "lib",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE",
+    "screenshot.png"
+  ]
 }
