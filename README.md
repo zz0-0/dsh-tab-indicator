@@ -9,6 +9,8 @@ any other tab whether work is still running — or stuck on you.
 
 ![Running and done tabs](screenshot.png)
 
+More state shots: [preview.png](docs/preview.png), [running.png](docs/running.png), [done.png](docs/done.png).
+
 ## Features
 
 - **Live running badge** — while one or more root sessions run, the favicon
