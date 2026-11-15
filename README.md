@@ -20,8 +20,10 @@ any other tab whether work is still running — or stuck on you.
   check stays only while the tab is hidden or the window is unfocused and clears
   when you return.
 - **Waiting-for-input marker** — while a question composer or an approval card is
-  on the page, the title starts with `?` and the favicon shows an amber question
-  badge. The marker stays until the card is answered or dismissed, survives
+  pending on any conversation, the title starts with `?` and the favicon shows an
+  amber question badge. The marker appears before you open the waiting
+  conversation: the sidebar's warning status and the host's cross-Session count
+  both feed it. It stays until the question is answered or dismissed, survives
   focus/visibility changes, and outranks the running and done states.
 - **Static by design** — the favicon is repainted only when the count, the
   running/done state, or the waiting state changes. This avoids Chrome restarting
@@ -137,7 +139,7 @@ The SSE snapshot is small:
 
 ```
 GET /dsh-tab-indicator/events   text/event-stream
-data: {"type":"state","running":1,"sessions":["…"],"at":…}
+data: {"type":"state","running":1,"waiting":0,"sessions":["…"],"at":…}
 ```
 
 - `ctx.agents.roots()` seeds the snapshot for agents that are already running
@@ -156,11 +158,14 @@ paints a count/check badge on a 64×64 canvas over the page's original favicon.
 It repaints only when the count or state changes.
 
 The browser half also watches the document for the two blocking composers DSH
-mounts while it waits for a human: `data-question-key` (the
-`ask_user_question` card) and `data-approval-key` (the approval card). A
-matching card switches the tab to the waiting state; removing it restores the
-turn state. The host does not track questions, so the SSE snapshot stays as
-small as before.
+mounts while it waits for a human (`data-question-key` for the
+`ask_user_question` card, `data-approval-key` for an approval), and for any
+Session row marked with `data-state="warning"` in the sidebar. The host adds a
+`waiting` count to the SSE snapshot: timed questions come from the
+`userQuestions` projection, blocking questions and approvals from their
+waterfall lifetime. The local sidebar signal covers the case where the waiting
+conversation is not the one currently open; the host signal covers every root
+Session.
 
 ## Privacy
 
@@ -250,9 +255,8 @@ Generated test artifacts land in `test/out/` and are git-ignored.
 - It tracks **turn-level** activity. A background job that outlives its turn is
   not counted; adding the jobs service would be the next step if that matters.
 - It is a Web-profile plugin: it needs `webServer` and `agents`.
-- The waiting marker tracks cards mounted on this page. A question in a
-  different Session, or a card the user closes, does not mark this tab; the
-  Session list's own "Needs input" status still shows it.
+- Closing a question card does not clear the marker: the host and the sidebar
+  still report the question until it is answered or cancelled.
 - The favicon is a `data:image/png` URL. If a deployment adds a Content Security
   Policy, `img-src` must allow `data:` (the current Web index has no CSP).
 - A fully closed browser cannot show anything, by definition.

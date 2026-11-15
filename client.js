@@ -33,8 +33,9 @@
   // for pages that still have the previous version's title.
   const PREFIX = new RegExp(`^(?:\\?\\s+|\\u25CF(?:\\s*\\d+)?\\s*|${DONE_MARK}\\s*|\\(\\d+\\)\\s*)`, 'u')
   const EVENTS_URL = '/dsh-tab-indicator/events'
-  // DSH marks the two blocking composers with these stable data hooks.
-  const WAITING_SELECTOR = '[data-question-key], [data-approval-key]'
+  // DSH marks the two blocking composers, and every Session row that needs
+  // input, with these stable data hooks.
+  const WAITING_SELECTOR = '[data-question-key], [data-approval-key], [data-row-key^="session:"] [data-state="warning"]'
   const ICON_SIZE = 64
   const DONE_HOLD_MS = 1200
   const FLASH_MS = 1100
@@ -42,8 +43,12 @@
   /** @type {'idle' | 'running' | 'done'} */
   let phase = 'idle'
   let running = 0
-  /** Number of answerable question/approval cards currently on the page. */
-  let waiting = 0
+  /** True while any answerable question/approval is known to be pending. */
+  let waiting = false
+  /** Answerable cards or Session-row warnings mounted on this page. */
+  let waitingLocal = 0
+  /** Pending questions/approvals reported by the host across all Sessions. */
+  let waitingHost = 0
   /** A completion is being shown while other work remains (visible tabs only). */
   let flash = false
   let baseTitle = stripPrefix(document.title || '')
@@ -64,9 +69,9 @@
   const renderCtx = renderCanvas.getContext('2d')
 
   window.__DSH_TAB_INDICATOR__ = {
-    version: 5,
+    version: 6,
     getState() {
-      return { phase, running, waiting, flash, visible: isVisible() }
+      return { phase, running, waiting, waitingLocal, waitingHost, flash, visible: isVisible() }
     },
   }
 
@@ -93,20 +98,29 @@
 
   // -------------------------------------------------------------- waiting --
 
-  function countWaitingCards() {
+  function countWaitingSignals() {
     return document.querySelectorAll(WAITING_SELECTOR).length
   }
 
-  /** Repaint only when the answerable-card presence changes. */
+  /** Repaint only when the answerable-input presence changes. */
   function syncWaiting() {
-    const next = countWaitingCards()
+    waitingLocal = countWaitingSignals()
+    const next = waitingHost > 0 || waitingLocal > 0
     if (next === waiting) return
     waiting = next
     render()
   }
 
-  /** Whether one added/removed subtree is or contains an answerable card. */
-  function holdsWaitingCard(node) {
+  /** The host's cross-Session count: a question in another conversation counts. */
+  function setHostWaiting(value) {
+    const count = Number.isFinite(Number(value)) ? Math.max(0, Math.trunc(Number(value))) : 0
+    if (count === waitingHost) return
+    waitingHost = count
+    syncWaiting()
+  }
+
+  /** Whether one added/removed subtree is or contains a waiting signal. */
+  function holdsWaitingSignal(node) {
     if (!node || node.nodeType !== 1) return false
     if (typeof node.matches === 'function' && node.matches(WAITING_SELECTOR)) return true
     return typeof node.querySelector === 'function' && node.querySelector(WAITING_SELECTOR) !== null
@@ -115,7 +129,7 @@
   // ---------------------------------------------------------------- title --
 
   function titlePrefix() {
-    if (waiting > 0) return '? '
+    if (waiting) return '? '
     if (flash || phase === 'done') return `${DONE_MARK} `
     if (phase === 'running' && running > 1) return `(${running}) `
     return ''
@@ -318,7 +332,7 @@
   }
 
   function paintIcon() {
-    const kind = waiting > 0
+    const kind = waiting
       ? 'waiting'
       : flash || phase === 'done' ? 'done' : phase === 'running' ? 'running' : 'idle'
     const key = kind === 'running' ? `running:${running}` : kind
@@ -453,6 +467,7 @@
         return
       }
       if (data && typeof data.running === 'number') setRunning(data.running)
+      if (data && typeof data.waiting === 'number') setHostWaiting(data.waiting)
     })
     // EventSource reconnects by itself; the next message is a full snapshot.
     source.addEventListener('error', () => {})
@@ -467,15 +482,29 @@
   // re-scan when a mutation can have changed their presence.
   const waitingObserver = new MutationObserver((records) => {
     for (const record of records) {
+      if (record.type === 'attributes') {
+        const target = record.target
+        if (target && typeof target.closest === 'function'
+          && target.closest('[data-row-key^="session:"]')) {
+          syncWaiting()
+          return
+        }
+        continue
+      }
       for (const node of [...record.addedNodes, ...record.removedNodes]) {
-        if (!holdsWaitingCard(node)) continue
+        if (!holdsWaitingSignal(node)) continue
         syncWaiting()
         return
       }
     }
   })
   if (document.documentElement) {
-    waitingObserver.observe(document.documentElement, { childList: true, subtree: true })
+    waitingObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-state'],
+    })
   }
   syncWaiting()
   syncTitle()

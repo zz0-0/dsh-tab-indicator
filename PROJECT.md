@@ -10,13 +10,13 @@
 - 链：`/home/zz/Project/ai/chains/coding.md`
 - 技能包：`/home/zz/Project/ai/skills/packs/coding/INDEX.md`
 - 文档：`README.md`
-- 任务记录：`TRACE.md`
+- 任务记录：`TODO.md`
 
 ## 闸门
 
 - pre-push：`.githooks/pre-push`（新 clone 后 `git config core.hooksPath .githooks`）
-- closeout：check + `TRACE.md` 最新一节四行 + 一个环境 diff / none
+- closeout：check + `TODO.md` 最新一节四行 + 一个环境 diff / none
 
 ## 不做
 
-- 状态不写链；状态在本页、`TRACE.md`、`/home/zz/Project/ai/conventions/checks/tools/status`。
+- 状态不写链；当前 / 历史在 `TODO.md`；视图在 `/home/zz/Project/ai/conventions/checks/tools/status`。

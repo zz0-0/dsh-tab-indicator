@@ -44,10 +44,11 @@ const FAVICON_DARK = `<svg xmlns="http://www.w3.org/2000/svg" width="50" height=
 </svg>`
 
 let running = 0
+let hostWaiting = 0
 const clients = new Set()
 
 function frame() {
-  return `data: ${JSON.stringify({ type: 'state', running, sessions: [], at: Date.now() })}\n\n`
+  return `data: ${JSON.stringify({ type: 'state', running, waiting: hostWaiting, sessions: [], at: Date.now() })}\n\n`
 }
 
 function broadcast() {
@@ -91,7 +92,8 @@ const server = http.createServer((req, res) => {
     return
   }
   if (url.pathname === '/control') {
-    running = Math.max(0, Number(url.searchParams.get('running')) || 0)
+    if (url.searchParams.has('running')) running = Math.max(0, Number(url.searchParams.get('running')) || 0)
+    if (url.searchParams.has('waiting')) hostWaiting = Math.max(0, Number(url.searchParams.get('waiting')) || 0)
     broadcast()
     res.writeHead(200, { 'content-type': 'text/plain' })
     res.end('ok')
@@ -135,6 +137,10 @@ const context = await browser.newContext({ colorScheme: 'light' })
 
 async function setRunning(count) {
   await fetch(`${base}/control?running=${count}`)
+}
+
+async function setHostWaiting(count) {
+  await fetch(`${base}/control?waiting=${count}`)
 }
 
 async function titleOf(page) {
@@ -198,6 +204,31 @@ async function setWaitingCard(page, present, kind = 'question') {
   }, { present, kind })
 }
 
+
+async function addSessionRow(page) {
+  await page.evaluate(() => {
+    if (document.querySelector('[data-row-key="session:fixture"]')) return
+    const row = document.createElement('div')
+    row.setAttribute('data-row-key', 'session:fixture')
+    const dot = document.createElement('span')
+    dot.setAttribute('data-state', 'ongoing')
+    row.appendChild(dot)
+    document.body.appendChild(row)
+  })
+}
+
+async function markSessionWarning(page) {
+  await page.evaluate(() => {
+    document.querySelector('[data-row-key="session:fixture"] span')?.setAttribute('data-state', 'warning')
+  })
+}
+
+async function removeSessionRow(page) {
+  await page.evaluate(() => {
+    document.querySelector('[data-row-key="session:fixture"]')?.remove()
+  })
+}
+
 const page = await context.newPage()
 try {
   await page.goto(base)
@@ -208,6 +239,7 @@ try {
   let state = await stateOf(page)
   assert.equal(state.phase, 'idle')
   assert.equal(state.running, 0)
+  assert.equal(state.waiting, false)
 
   let icons = await iconsOf(page)
   assert.deepEqual(icons.map((icon) => icon.href), ['/favicon-dark.svg', '/favicon.svg'])
@@ -303,12 +335,52 @@ try {
   assert.deepEqual(icons.map((icon) => icon.href), ['/favicon-dark.svg', '/favicon.svg'])
   assert.ok(icons.every((icon) => icon.type === 'image/svg+xml'))
 
+
+  // ---- a non-active Session's warning marks the tab -----------------------
+  // The sidebar already knows every Session that needs input; its warning dot
+  // is the signal that arrives before the question conversation is opened.
+  await addSessionRow(page)
+  await page.waitForTimeout(100)
+  assert.equal((await stateOf(page)).waiting, false)
+  await markSessionWarning(page)
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === true)
+  await page.waitForFunction(() => document.title === '? Renamed — DSH')
+  await removeSessionRow(page)
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === false)
+  await page.waitForFunction(() => document.title === 'Renamed — DSH')
+
+  // ---- a host-reported question needs no mounted card ----------------------
+  // This is the cross-Session case: the question belongs to a conversation the
+  // browser is not showing, so no `[data-question-key]` exists yet.
+  await setHostWaiting(1)
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === true)
+  await page.waitForFunction(() => document.title === '? Renamed — DSH')
+  state = await stateOf(page)
+  assert.equal(state.waitingHost, 1)
+  assert.equal(state.waitingLocal, 0)
+  await setHostWaiting(0)
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === false)
+  await page.waitForFunction(() => document.title === 'Renamed — DSH')
+
+  // Either signal keeps the marker; the other clearing first must not wipe it.
+  await setHostWaiting(1)
+  await setWaitingCard(page, true)
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === true)
+  await setHostWaiting(0)
+  await page.waitForFunction(() => {
+    const current = window.__DSH_TAB_INDICATOR__.getState()
+    return current.waiting === true && current.waitingHost === 0 && current.waitingLocal === 1
+  })
+  assert.equal(await titleOf(page), '? Renamed — DSH')
+  await setWaitingCard(page, false)
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === false)
+
   // ---- a pending input card keeps the tab marked --------------------------
   await page.evaluate(() => {
     Object.defineProperty(Document.prototype, 'hasFocus', { configurable: true, value: () => true })
   })
   await setWaitingCard(page, true)
-  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === 1)
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === true)
   await page.waitForFunction(() => document.title === '? Renamed — DSH')
   state = await stateOf(page)
   assert.equal(state.phase, 'idle')
@@ -329,7 +401,7 @@ try {
   await setRunning(1)
   await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().running === 1)
   assert.equal(await titleOf(page), '? Renamed Again — DSH')
-  assert.equal((await stateOf(page)).waiting, 1)
+  assert.equal((await stateOf(page)).waiting, true)
 
   // The marker stays through a backgrounded-state transition.
   await page.evaluate(() => {
@@ -352,20 +424,20 @@ try {
     return current.phase === 'idle' && current.flash === false && current.running === 0
   }, undefined, { timeout: 5000 })
   assert.equal(await titleOf(page), '? Renamed Again — DSH')
-  assert.equal((await stateOf(page)).waiting, 1)
+  assert.equal((await stateOf(page)).waiting, true)
 
   // Answering the card removes the marker and restores the base title.
   await setWaitingCard(page, false)
-  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === 0)
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === false)
   await page.waitForFunction(() => document.title === 'Renamed Again — DSH')
   assert.deepEqual((await iconsOf(page)).map((icon) => icon.href), ['/favicon-dark.svg', '/favicon.svg'])
 
   // Approval cards count as waiting too.
   await setWaitingCard(page, true, 'approval')
-  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === 1)
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === true)
   assert.equal(await titleOf(page), '? Renamed Again — DSH')
   await setWaitingCard(page, false, 'approval')
-  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === 0)
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === false)
 
   await page.evaluate(() => { document.title = 'Renamed — DSH' })
   await page.waitForFunction(() => document.title === 'Renamed — DSH')
@@ -407,7 +479,7 @@ try {
   try {
     await bootPage.goto(`${base}?waiting=1`)
     await bootPage.waitForFunction(() => Boolean(window.__DSH_TAB_INDICATOR__?.getState))
-    await bootPage.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === 1)
+    await bootPage.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === true)
     assert.equal(await bootPage.title(), '? Session — DSH Local Build')
     const bootIcons = await iconsOf(bootPage)
     assert.ok(bootIcons.every((icon) => icon.resolved.startsWith('data:image/png;base64,')))

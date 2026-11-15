@@ -36,10 +36,21 @@ function createContext({ roots = [], rejection } = {}) {
   const taps = []
   const listeners = new Map()
   const disposers = []
+  const views = new Map()
+  const projectionListeners = new Set()
 
   const ctx = {
     agents: {
       roots: () => roots,
+    },
+    sessionProjections: {
+      snapshot(session) {
+        return { asOfSeq: 0, values: { userQuestions: { active: views.get(session.id) ?? [], settled: [] } } }
+      },
+      onChanged(fn) {
+        projectionListeners.add(fn)
+        return () => projectionListeners.delete(fn)
+      },
     },
     webServer: {
       register(route) {
@@ -68,7 +79,11 @@ function createContext({ roots = [], rejection } = {}) {
     },
   }
 
-  return { ctx, routes, taps, listeners, disposers }
+  const notifyProjection = (session, key = 'userQuestions') => {
+    for (const fn of projectionListeners) fn(session, key, undefined, 0)
+  }
+
+  return { ctx, routes, taps, listeners, disposers, views, notifyProjection }
 }
 
 function rootAgent(id, status = 'running') {
@@ -89,6 +104,22 @@ function subagent(id) {
 
 function emit(listeners, name, payload) {
   for (const fn of listeners.get(name) || []) fn(payload)
+}
+
+function emitWaterfall(listeners, name, payload, next) {
+  let result
+  for (const fn of listeners.get(name) || []) result = fn(payload, next)
+  return result
+}
+
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
 }
 
 function stateFrames(response) {
@@ -118,6 +149,7 @@ test('streams the initial empty snapshot', () => {
   const [state] = stateFrames(response)
   assert.equal(state.type, 'state')
   assert.equal(state.running, 0)
+  assert.equal(state.waiting, 0)
   assert.deepEqual(state.sessions, [])
 })
 
@@ -249,4 +281,66 @@ test('counts a running root without a session header', () => {
   const state = stateFrames(response).at(-1)
   assert.equal(state.running, 1)
   assert.deepEqual(state.sessions, ['root-no-header'])
+})
+
+
+test('counts a blocking question until it settles', async () => {
+  const { ctx, routes, listeners } = createContext()
+  apply(ctx)
+  const response = openStream(routes)
+  const pending = deferred()
+  const result = emitWaterfall(
+    listeners,
+    'user-questions/request',
+    { questions: [{ id: 'q', question: 'Continue?' }] },
+    () => pending.promise,
+  )
+  assert.equal(stateFrames(response).at(-1).waiting, 1)
+  pending.resolve({ answers: [] })
+  await result
+  assert.equal(stateFrames(response).at(-1).waiting, 0)
+})
+
+test('counts a timed question from the userQuestions projection', () => {
+  const agent = rootAgent('timed-1')
+  const { ctx, routes, views, notifyProjection } = createContext({ roots: [agent] })
+  views.set('timed-1', [{ callId: 'c1', questions: [], state: 'continued' }])
+  apply(ctx)
+  const response = openStream(routes)
+  assert.equal(stateFrames(response).at(-1).waiting, 1)
+
+  views.set('timed-1', [])
+  notifyProjection(agent.session)
+  assert.equal(stateFrames(response).at(-1).waiting, 0)
+})
+
+test('does not double-count a timed request', async () => {
+  const agent = rootAgent('timed-2')
+  const { ctx, routes, views, listeners } = createContext({ roots: [agent] })
+  views.set('timed-2', [{ callId: 'c2', questions: [], state: 'open' }])
+  apply(ctx)
+  const response = openStream(routes)
+  const pending = deferred()
+  const result = emitWaterfall(
+    listeners,
+    'user-questions/request',
+    { wait: { callId: 'c2', timed: true } },
+    () => pending.promise,
+  )
+  assert.equal(stateFrames(response).at(-1).waiting, 1)
+  pending.resolve({ answers: [] })
+  await result
+  assert.equal(stateFrames(response).at(-1).waiting, 1)
+})
+
+test('counts an approval request until it settles', async () => {
+  const { ctx, routes, listeners } = createContext()
+  apply(ctx)
+  const response = openStream(routes)
+  const pending = deferred()
+  const result = emitWaterfall(listeners, 'approval/request', { toolName: 'bash' }, () => pending.promise)
+  assert.equal(stateFrames(response).at(-1).waiting, 1)
+  pending.resolve('allowed-once')
+  await result
+  assert.equal(stateFrames(response).at(-1).waiting, 0)
 })
