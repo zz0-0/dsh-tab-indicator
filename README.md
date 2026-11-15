@@ -3,8 +3,9 @@
 **English** | [简体中文](README.zh.md)
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) web
-plugin that puts the agent's running/done state on the browser tab, so you can
-see from any other tab whether work is still running.
+plugin that puts the agent's running/done state on the browser tab and flags a
+question or approval card that is waiting for your answer, so you can see from
+any other tab whether work is still running — or stuck on you.
 
 ![Running and done tabs](screenshot.png)
 
@@ -18,9 +19,14 @@ see from any other tab whether work is still running.
   second. If other runs remain, the count badge comes back; if none remain, the
   check stays only while the tab is hidden or the window is unfocused and clears
   when you return.
-- **Static by design** — the favicon is repainted only when the count or the
-  running/done state changes. This avoids Chrome restarting its own favicon
-  loading indicator on every frame, which makes the bookmark icon churn.
+- **Waiting-for-input marker** — while a question composer or an approval card is
+  on the page, the title starts with `?` and the favicon shows an amber question
+  badge. The marker stays until the card is answered or dismissed, survives
+  focus/visibility changes, and outranks the running and done states.
+- **Static by design** — the favicon is repainted only when the count, the
+  running/done state, or the waiting state changes. This avoids Chrome restarting
+  its own favicon loading indicator on every frame, which makes the bookmark
+  icon churn.
 - **Theme aware** — uses the light or dark favicon variant the browser is
   currently showing, regenerates it when the color scheme changes, and restores
   the original `<link>` elements when idle.
@@ -87,6 +93,10 @@ systemctl --user restart dsh-web
   runs are still active, the count badge returns. If nothing remains, the check
   stays only while the tab is hidden or the window is unfocused; it clears when
   you return.
+- While a question or approval card is on the page, the title starts with `?`
+  and the favicon gets an amber question badge. The marker persists while the
+  card is mounted and takes priority over the running count and the done check;
+  it disappears when the card is answered or dismissed.
 - The count is global to the DSH host, not limited to the current workspace; a
   run in another session still counts.
 - Subagent turns are part of their root turn and do not add to the count.
@@ -145,6 +155,13 @@ The browser half (`client.js`) consumes the stream, decorates the title, and
 paints a count/check badge on a 64×64 canvas over the page's original favicon.
 It repaints only when the count or state changes.
 
+The browser half also watches the document for the two blocking composers DSH
+mounts while it waits for a human: `data-question-key` (the
+`ask_user_question` card) and `data-approval-key` (the approval card). A
+matching card switches the tab to the waiting state; removing it restores the
+turn state. The host does not track questions, so the SSE snapshot stays as
+small as before.
+
 ## Privacy
 
 - **No outbound requests** — the host makes no network calls, and the plugin
@@ -193,9 +210,9 @@ systemctl --user restart dsh-web
 | `package.json` | DSH bundle metadata |
 | `cordis.patch.yml` | Inserts the plugin into the web profile |
 | `lib/index.js` | Host: agent tracking, SSE route, client injection |
-| `client.js` | Browser: title count/check, static favicon badge, flash/done state |
+| `client.js` | Browser: title count/check/question mark, static favicon badge, waiting/done state |
 | `test/host.test.mjs` | Node tests for the host half |
-| `test/browser.test.mjs` | Chromium test for title/favicon/done behavior |
+| `test/browser.test.mjs` | Chromium test for title/favicon/done/waiting behavior |
 | `screenshot.png` | README screenshot |
 
 ### UI integration
@@ -233,6 +250,9 @@ Generated test artifacts land in `test/out/` and are git-ignored.
 - It tracks **turn-level** activity. A background job that outlives its turn is
   not counted; adding the jobs service would be the next step if that matters.
 - It is a Web-profile plugin: it needs `webServer` and `agents`.
+- The waiting marker tracks cards mounted on this page. A question in a
+  different Session, or a card the user closes, does not mark this tab; the
+  Session list's own "Needs input" status still shows it.
 - The favicon is a `data:image/png` URL. If a deployment adds a Content Security
   Policy, `img-src` must allow `data:` (the current Web index has no CSP).
 - A fully closed browser cannot show anything, by definition.

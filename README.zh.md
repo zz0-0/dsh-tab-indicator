@@ -3,8 +3,9 @@
 [English](README.md) | **简体中文**
 
 一个 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（DSH）
-Web 插件：把 agent 的运行/完成状态放到浏览器标签页上，这样切到其他标签页时也能
-看到工作是否还在进行。
+Web 插件：把 agent 的运行/完成状态放到浏览器标签页上，并标出正在等待你回答的
+问答框或审批框，这样切到其他标签页时也能看到工作是否还在进行——或者是否卡在
+你这里。
 
 ![运行与完成状态](screenshot.png)
 
@@ -16,8 +17,11 @@ Web 插件：把 agent 的运行/完成状态放到浏览器标签页上，这�
   圆点。
 - **完成对勾** — 运行结束时，标签页显示约一秒的绿色对勾。如果还有其他运行，数量
   徽章会恢复；如果没有，对勾只在标签页隐藏或窗口失焦时保留，回来后自动清除。
-- **刻意静态** — favicon 只在数量或运行/完成状态变化时重绘。这样避免 Chrome
-  把每一帧都当成新的 favicon 加载、导致书签图标不断闪烁。
+- **等待回答标记** — 页面上有问答框或审批框时，标题以 `?` 开头，favicon 显示
+  琥珀色问号徽章。标记会一直保留到卡片被回答或关闭，切走/切回不会清除，并且
+  优先于运行和完成状态。
+- **刻意静态** — favicon 只在数量、运行/完成状态或等待状态变化时重绘。这样避免
+  Chrome 把每一帧都当成新的 favicon 加载、导致书签图标不断闪烁。
 - **明暗主题** — 使用浏览器当前显示的 light/dark favicon 变体；主题切换时重新
   生成；空闲时恢复原始 `<link>` 元素。
 - **无轮询** — Host 通过 Server-Sent Events 推送完整快照；Host 重启后页面会自动
@@ -78,6 +82,9 @@ systemctl --user restart dsh-web
   只有一个运行时会保持标题不变；多于一个时才加 `(N)`。
 - 运行结束时，标签页显示约一秒的绿色对勾。如果还有其他运行，数量徽章恢复；如果
   没有，对勾只在标签页隐藏或窗口失焦时保留，回来后清除。
+- 页面上有问答框或审批框时，标题以 `?` 开头，favicon 显示琥珀色问号徽章。卡片
+  在页面上期间标记一直保留，并优先于运行数量和完成对勾；卡片被回答或关闭后标记
+  消失。
 - 计数是 DSH Host 全局的，不限于当前工作区；其他会话里的运行也会计入。
 - 子 agent 的轮次属于其根轮次，不额外增加数量。
 - 计数是 **轮次级** 的。运行结束后仍在继续的后台任务不会计入；见
@@ -128,6 +135,11 @@ data: {"type":"state","running":1,"sessions":["…"],"at":…}
 浏览器侧（`client.js`）消费该流、装饰标题，并在 64×64 画布上把数量/对勾徽章绘制
 到页面原始 favicon 上。只有数量或状态变化时才重绘。
 
+浏览器侧还会观察页面里 DSH 等待人回答时挂载的两种阻塞式卡片：
+`data-question-key`（`ask_user_question` 问答框）与 `data-approval-key`
+（审批框）。出现匹配卡片时标签页切换到等待状态，卡片移除后恢复运行/完成状态。
+Host 不跟踪问答，SSE 快照保持原来的大小。
+
 ## 隐私
 
 - **无对外请求** — Host 不发起任何网络请求，插件也不需要 DeepSeek API Key。
@@ -171,9 +183,9 @@ systemctl --user restart dsh-web
 | `package.json` | DSH bundle 元数据 |
 | `cordis.patch.yml` | 把插件插入 web profile |
 | `lib/index.js` | Host：agent 跟踪、SSE 路由、客户端注入 |
-| `client.js` | 浏览器侧：标题数量/对勾、静态 favicon 徽章、完成/空闲状态 |
+| `client.js` | 浏览器侧：标题数量/对勾/问号、静态 favicon 徽章、等待/完成状态 |
 | `test/host.test.mjs` | Host 侧的 Node 测试 |
-| `test/browser.test.mjs` | 标题/favicon/完成行为的 Chromium 测试 |
+| `test/browser.test.mjs` | 标题/favicon/完成/等待行为的 Chromium 测试 |
 | `screenshot.png` | README 截图 |
 
 ### UI 集成
@@ -211,6 +223,8 @@ node --test test/browser.test.mjs
 - 只跟踪 **轮次级** 活动。运行结束后仍在继续的后台任务不会计入；如果这很重要，
   下一步可以接入 jobs 服务。
 - 这是 Web profile 插件：需要 `webServer` 与 `agents`。
+- 等待标记只跟踪当前页面上挂载的卡片。其他会话里的问答、或用户已经关闭的卡片，
+  不会给这个标签页加标记；会话列表自己的「需要输入」状态仍会显示。
 - favicon 是 `data:image/png` URL。如果部署添加了内容安全策略（CSP），
   `img-src` 必须允许 `data:`（当前 Web 首页没有 CSP）。
 - 浏览器完全关闭时无法显示任何内容，这是定义使然。

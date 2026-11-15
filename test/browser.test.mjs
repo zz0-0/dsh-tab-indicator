@@ -1,5 +1,6 @@
 /**
- * End-to-end check of the browser half in a real Chromium.
+ * End-to-end check of the browser half in a real Chromium: running, done,
+ * waiting-for-input, and theme behavior.
  *
  * Run with the Playwright core and Chromium paths available in this
  * environment, for example:
@@ -57,7 +58,9 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1')
   if (url.pathname === '/') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-    res.end(HTML)
+    res.end(url.searchParams.get('waiting') === '1'
+      ? HTML.replace('</body>', '<div data-question-key="boot-fixture"></div></body>')
+      : HTML)
     return
   }
   if (url.pathname === '/favicon.svg') {
@@ -165,6 +168,36 @@ async function basePixelOf(page, dataUrl) {
   }, dataUrl)
 }
 
+async function pixelOf(page, dataUrl, x, y) {
+  return page.evaluate(async ({ href, x, y }) => {
+    const img = new Image()
+    img.src = href
+    await img.decode()
+    const canvas = document.createElement('canvas')
+    canvas.width = 64
+    canvas.height = 64
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0, 64, 64)
+    return [...ctx.getImageData(x, y, 1, 1).data]
+  }, { href: dataUrl, x, y })
+}
+
+async function setWaitingCard(page, present, kind = 'question') {
+  await page.evaluate(({ present, kind }) => {
+    const selector = kind === 'approval' ? '[data-approval-key]' : '[data-question-key]'
+    let card = document.querySelector(selector)
+    if (!present) {
+      card?.remove()
+      return
+    }
+    if (card !== null) return
+    card = document.createElement('div')
+    card.setAttribute(kind === 'approval' ? 'data-approval-key' : 'data-question-key', 'fixture-card')
+    card.textContent = 'fixture card'
+    document.body.appendChild(card)
+  }, { present, kind })
+}
+
 const page = await context.newPage()
 try {
   await page.goto(base)
@@ -270,6 +303,73 @@ try {
   assert.deepEqual(icons.map((icon) => icon.href), ['/favicon-dark.svg', '/favicon.svg'])
   assert.ok(icons.every((icon) => icon.type === 'image/svg+xml'))
 
+  // ---- a pending input card keeps the tab marked --------------------------
+  await page.evaluate(() => {
+    Object.defineProperty(Document.prototype, 'hasFocus', { configurable: true, value: () => true })
+  })
+  await setWaitingCard(page, true)
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === 1)
+  await page.waitForFunction(() => document.title === '? Renamed — DSH')
+  state = await stateOf(page)
+  assert.equal(state.phase, 'idle')
+  icons = await iconsOf(page)
+  assert.ok(icons.every((icon) => icon.resolved.startsWith('data:image/png;base64,')))
+  const waitingPixel = await pixelOf(page, icons[1].resolved, 32, 42)
+  assert.ok(
+    waitingPixel[0] > 150 && waitingPixel[1] > 70 && waitingPixel[1] < 190 && waitingPixel[2] < 90,
+    `amber question badge: ${waitingPixel}`,
+  )
+  writeDataUrl('question.png', icons[1].resolved)
+
+  // The marker survives a title rewrite by the application.
+  await page.evaluate(() => { document.title = 'Renamed Again — DSH' })
+  await page.waitForFunction(() => document.title === '? Renamed Again — DSH')
+
+  // A running turn must not replace the input marker.
+  await setRunning(1)
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().running === 1)
+  assert.equal(await titleOf(page), '? Renamed Again — DSH')
+  assert.equal((await stateOf(page)).waiting, 1)
+
+  // The marker stays through a backgrounded-state transition.
+  await page.evaluate(() => {
+    Object.defineProperty(Document.prototype, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    Object.defineProperty(Document.prototype, 'hidden', { configurable: true, get: () => true })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await page.waitForTimeout(100)
+  assert.equal(await titleOf(page), '? Renamed Again — DSH')
+  await page.evaluate(() => {
+    Object.defineProperty(Document.prototype, 'visibilityState', { configurable: true, get: () => 'visible' })
+    Object.defineProperty(Document.prototype, 'hidden', { configurable: true, get: () => false })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+
+  // A completion while the card is up must not clear it.
+  await setRunning(0)
+  await page.waitForFunction(() => {
+    const current = window.__DSH_TAB_INDICATOR__.getState()
+    return current.phase === 'idle' && current.flash === false && current.running === 0
+  }, undefined, { timeout: 5000 })
+  assert.equal(await titleOf(page), '? Renamed Again — DSH')
+  assert.equal((await stateOf(page)).waiting, 1)
+
+  // Answering the card removes the marker and restores the base title.
+  await setWaitingCard(page, false)
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === 0)
+  await page.waitForFunction(() => document.title === 'Renamed Again — DSH')
+  assert.deepEqual((await iconsOf(page)).map((icon) => icon.href), ['/favicon-dark.svg', '/favicon.svg'])
+
+  // Approval cards count as waiting too.
+  await setWaitingCard(page, true, 'approval')
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === 1)
+  assert.equal(await titleOf(page), '? Renamed Again — DSH')
+  await setWaitingCard(page, false, 'approval')
+  await page.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === 0)
+
+  await page.evaluate(() => { document.title = 'Renamed — DSH' })
+  await page.waitForFunction(() => document.title === 'Renamed — DSH')
+
   // ---- a completion while focused flashes, then goes idle -----------------
   await page.evaluate(() => {
     Object.defineProperty(Document.prototype, 'hasFocus', { configurable: true, value: () => true })
@@ -301,6 +401,19 @@ try {
   assert.ok(darkPixel[0] < 60 && darkPixel[2] < 100, `dark favicon used: ${darkPixel}`)
   await darkContext.close()
   await setRunning(0)
+
+  // ---- a card already present at boot is detected immediately --------------
+  const bootPage = await context.newPage()
+  try {
+    await bootPage.goto(`${base}?waiting=1`)
+    await bootPage.waitForFunction(() => Boolean(window.__DSH_TAB_INDICATOR__?.getState))
+    await bootPage.waitForFunction(() => window.__DSH_TAB_INDICATOR__.getState().waiting === 1)
+    assert.equal(await bootPage.title(), '? Session — DSH Local Build')
+    const bootIcons = await iconsOf(bootPage)
+    assert.ok(bootIcons.every((icon) => icon.resolved.startsWith('data:image/png;base64,')))
+  } finally {
+    await bootPage.close()
+  }
 
   console.log('browser test passed')
 } finally {

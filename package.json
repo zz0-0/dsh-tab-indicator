@@ -1,10 +1,10 @@
 {
   "name": "dsh-tab-indicator",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
-  "description": "Running/done count badge on the DSH browser tab",
+  "description": "Running/done and waiting-for-input indicator on the DSH browser tab",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -38,8 +38,13 @@
     "indicator",
     "running",
     "done",
+    "waiting",
+    "question",
+    "approval",
     "标签页",
-    "任务"
+    "任务",
+    "问答",
+    "等待"
   ],
   "files": [
     "lib",

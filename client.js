@@ -7,6 +7,12 @@
  *   idle     original favicon, original title
  *   running  favicon with a blue count badge; `(N)` in the title when N > 1
  *   done     favicon with a green check; `✓` in the title
+ *   waiting  favicon with an amber question badge; `?` in the title
+ *
+ * A pending input card (the question composer or an approval request) outranks
+ * the turn states above: the tab reports that a human answer is waiting until
+ * the card leaves the page. The card is recognised by the stable `data-*` hooks
+ * the DSH UI puts on those two composers.
  *
  * The favicon is intentionally static between state changes. Chrome treats
  * every `<link rel=icon>` href change as a fresh favicon load, so continuously
@@ -25,8 +31,10 @@
   const DONE_MARK = '\u2713'
   // Strip our own decorations if the page was already decorated; `●` is kept
   // for pages that still have the previous version's title.
-  const PREFIX = new RegExp(`^(?:\\u25CF(?:\\s*\\d+)?\\s*|${DONE_MARK}\\s*|\\(\\d+\\)\\s*)`, 'u')
+  const PREFIX = new RegExp(`^(?:\\?\\s+|\\u25CF(?:\\s*\\d+)?\\s*|${DONE_MARK}\\s*|\\(\\d+\\)\\s*)`, 'u')
   const EVENTS_URL = '/dsh-tab-indicator/events'
+  // DSH marks the two blocking composers with these stable data hooks.
+  const WAITING_SELECTOR = '[data-question-key], [data-approval-key]'
   const ICON_SIZE = 64
   const DONE_HOLD_MS = 1200
   const FLASH_MS = 1100
@@ -34,6 +42,8 @@
   /** @type {'idle' | 'running' | 'done'} */
   let phase = 'idle'
   let running = 0
+  /** Number of answerable question/approval cards currently on the page. */
+  let waiting = 0
   /** A completion is being shown while other work remains (visible tabs only). */
   let flash = false
   let baseTitle = stripPrefix(document.title || '')
@@ -54,9 +64,9 @@
   const renderCtx = renderCanvas.getContext('2d')
 
   window.__DSH_TAB_INDICATOR__ = {
-    version: 4,
+    version: 5,
     getState() {
-      return { phase, running, flash, visible: isVisible() }
+      return { phase, running, waiting, flash, visible: isVisible() }
     },
   }
 
@@ -81,9 +91,31 @@
     return count > 9 ? '9+' : String(count)
   }
 
+  // -------------------------------------------------------------- waiting --
+
+  function countWaitingCards() {
+    return document.querySelectorAll(WAITING_SELECTOR).length
+  }
+
+  /** Repaint only when the answerable-card presence changes. */
+  function syncWaiting() {
+    const next = countWaitingCards()
+    if (next === waiting) return
+    waiting = next
+    render()
+  }
+
+  /** Whether one added/removed subtree is or contains an answerable card. */
+  function holdsWaitingCard(node) {
+    if (!node || node.nodeType !== 1) return false
+    if (typeof node.matches === 'function' && node.matches(WAITING_SELECTOR)) return true
+    return typeof node.querySelector === 'function' && node.querySelector(WAITING_SELECTOR) !== null
+  }
+
   // ---------------------------------------------------------------- title --
 
   function titlePrefix() {
+    if (waiting > 0) return '? '
     if (flash || phase === 'done') return `${DONE_MARK} `
     if (phase === 'running' && running > 1) return `(${running}) `
     return ''
@@ -256,6 +288,16 @@
     ctx.stroke()
   }
 
+  function drawWaitingBadge(ctx) {
+    circle(ctx, 42.5, 42.5, 17, 'rgba(255, 255, 255, 0.96)')
+    circle(ctx, 42.5, 42.5, 14.5, '#d97706')
+    ctx.fillStyle = '#ffffff'
+    ctx.font = '700 18px -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('?', 42.5, 43)
+  }
+
   function applyIconUrl(url) {
     rememberIcons()
     for (const [link, original] of originalIcons) {
@@ -276,7 +318,9 @@
   }
 
   function paintIcon() {
-    const kind = flash || phase === 'done' ? 'done' : phase === 'running' ? 'running' : 'idle'
+    const kind = waiting > 0
+      ? 'waiting'
+      : flash || phase === 'done' ? 'done' : phase === 'running' ? 'running' : 'idle'
     const key = kind === 'running' ? `running:${running}` : kind
     if (key === lastIconKey) return
     lastIconKey = key
@@ -289,7 +333,8 @@
 
     renderCtx.clearRect(0, 0, ICON_SIZE, ICON_SIZE)
     drawBase(renderCtx)
-    if (kind === 'done') drawDoneBadge(renderCtx)
+    if (kind === 'waiting') drawWaitingBadge(renderCtx)
+    else if (kind === 'done') drawDoneBadge(renderCtx)
     else drawRunningBadge(renderCtx, labelOf(running))
     applyIconUrl(renderCanvas.toDataURL('image/png'))
   }
@@ -417,6 +462,22 @@
 
   rememberIcons()
   loadBaseIcon()
+
+  // Question and approval cards mount and unmount with the conversation; only
+  // re-scan when a mutation can have changed their presence.
+  const waitingObserver = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of [...record.addedNodes, ...record.removedNodes]) {
+        if (!holdsWaitingCard(node)) continue
+        syncWaiting()
+        return
+      }
+    }
+  })
+  if (document.documentElement) {
+    waitingObserver.observe(document.documentElement, { childList: true, subtree: true })
+  }
+  syncWaiting()
   syncTitle()
   connect()
 
